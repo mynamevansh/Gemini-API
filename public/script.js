@@ -2,7 +2,23 @@ const ws = new WebSocket("ws://localhost:3000");
 let isListening = false;
 let isProcessing = false;
 let isSpeaking = false;
-let currentUtterance = null;
+let cu// Stop AI speaking
+function stopAISpeaking() {
+  if (isSpeaking && currentUtterance) {
+    speechSynthesis.cancel();
+    isSpeaking = false;
+    container.classList.remove("speaking");
+    currentUtterance = null;
+    stopAIBtn.style.display = "none";
+    if (isListening) {
+      container.classList.add("listening");
+      statusEl.textContent = "🎤 Listening... (release to send)";
+    } else {
+      statusEl.textContent = "Ready - Hold button to talk";
+    }
+  }
+}
+
 let audioContext = null;
 let analyzer = null;
 let microphone = null;
@@ -21,13 +37,16 @@ const volumeBar = document.getElementById("volumeBar");
 const container = document.querySelector(".container");
 
 // Voice activity detection settings
-const SILENCE_THRESHOLD = 2000; // ms of silence before stopping recording
-const VOLUME_THRESHOLD = 0.005; // Minimum volume to detect voice (more sensitive)
-const MIN_SPEECH_DURATION = 300; // Minimum speech duration in ms
+const SILENCE_THRESHOLD = 1200; // ms of silence before stopping recording (reduced for faster response)
+const VOLUME_THRESHOLD = 0.003; // Minimum volume to detect voice (more sensitive)
+const MIN_SPEECH_DURATION = 200; // Minimum speech duration in ms (reduced)
 
 // Initialize
 statusEl.textContent = "Connecting...";
 toggleBtn.disabled = true;
+
+// Ensure clean initial state - no animations
+container.classList.remove("listening", "speaking");
 
 // Initialize speech recognition
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -36,6 +55,8 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = 'en-US';
+  recognition.maxAlternatives = 1;  // Faster processing
+  recognition.serviceURI = 'wss://www.google.com/speech-api/v2/recognize'; // Use faster endpoint
   
   recognition.onresult = (event) => {
     let finalTranscript = '';
@@ -52,18 +73,15 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
     
     if (finalTranscript) {
       recordedText += finalTranscript + ' ';
-      console.log(`📝 Final transcript: "${finalTranscript}"`);
-      console.log(`📄 Total recorded text: "${recordedText}"`);
     }
     
     if (interimTranscript) {
       statusEl.textContent = `🎤 "${interimTranscript.trim()}"`;
-      console.log(`🔄 Interim transcript: "${interimTranscript}"`);
     }
   };
   
   recognition.onerror = (event) => {
-    console.error('Speech recognition error:', event.error);
+    statusEl.textContent = "Speech recognition error";
   };
 } else {
   console.warn('Speech recognition not supported');
@@ -77,7 +95,7 @@ function speakText(text) {
       speechSynthesis.cancel();
       
       currentUtterance = new SpeechSynthesisUtterance(text);
-      currentUtterance.rate = 0.9;
+      currentUtterance.rate = 1.2;  // Faster speech rate
       currentUtterance.pitch = 1;
       currentUtterance.volume = 1;
       
@@ -94,6 +112,7 @@ function speakText(text) {
       
       currentUtterance.onstart = () => {
         isSpeaking = true;
+        container.classList.remove("listening");
         container.classList.add("speaking");
         statusEl.textContent = "🔊 AI Speaking...";
         stopAIBtn.style.display = "block";
@@ -105,9 +124,9 @@ function speakText(text) {
         currentUtterance = null;
         stopAIBtn.style.display = "none";
         if (isListening) {
-          statusEl.textContent = "🎤 Listening...";
+          statusEl.textContent = "🎤 Listening... (release to send)";
         } else {
-          statusEl.textContent = "Ready - Click to start listening";
+          statusEl.textContent = "Ready - Hold button to talk";
         }
         resolve();
       };
@@ -117,6 +136,11 @@ function speakText(text) {
         container.classList.remove("speaking");
         currentUtterance = null;
         stopAIBtn.style.display = "none";
+        if (isListening) {
+          statusEl.textContent = "🎤 Listening... (release to send)";
+        } else {
+          statusEl.textContent = "Ready - Hold button to talk";
+        }
         resolve();
       };
       
@@ -195,16 +219,12 @@ function voiceActivityDetection() {
   const volume = getVolumeLevel();
   volumeBar.style.width = (volume * 100) + '%';
   
-  // Debug logging
-  if (volume > 0.001) {
-    console.log(`Volume: ${volume.toFixed(4)}, Threshold: ${VOLUME_THRESHOLD}, Text: "${recordedText}"`);
-  }
+  // Reduced logging for cleaner console
   
   if (volume > VOLUME_THRESHOLD) {
     // Voice detected
     if (!voiceStartTime) {
       voiceStartTime = Date.now();
-      console.log("🎤 Voice started");
     }
     
     // Clear silence timer
@@ -215,17 +235,12 @@ function voiceActivityDetection() {
     
     statusEl.textContent = "🎤 Listening...";
   } else {
-    // Silence detected
-    if (voiceStartTime && !silenceTimer) {
-      console.log("🔇 Starting silence timer");
+    // Silence detected - auto-stop if button is still pressed
+    if (voiceStartTime && !silenceTimer && isButtonPressed) {
       silenceTimer = setTimeout(() => {
         const speechDuration = Date.now() - voiceStartTime;
-        console.log(`Speech duration: ${speechDuration}ms, Text: "${recordedText.trim()}"`);
-        if (speechDuration > MIN_SPEECH_DURATION && recordedText.trim()) {
-          console.log("✅ Processing voice input");
-          processVoiceInput();
-        } else {
-          console.log("❌ Speech too short or no text");
+        if (speechDuration > MIN_SPEECH_DURATION && recordedText.trim() && isButtonPressed) {
+          stopListeningAndProcess();
         }
         voiceStartTime = null;
         silenceTimer = null;
@@ -241,31 +256,45 @@ function processVoiceInput() {
   if (isProcessing || !recordedText.trim()) return;
   
   isProcessing = true;
-  container.classList.remove("listening");
+  // Remove all animation classes during processing
+  container.classList.remove("listening", "speaking");
   statusEl.textContent = "🤖 Processing...";
   
   // Add user message to conversation
   addMessage(recordedText.trim(), 'user');
   
+  // Set timeout for response
+  const responseTimeout = setTimeout(() => {
+    if (isProcessing) {
+      isProcessing = false;
+      container.classList.remove("listening", "speaking");
+      statusEl.textContent = "⏰ Response timeout - try again";
+      setTimeout(() => {
+        statusEl.textContent = "Ready - Hold button to talk";
+      }, 2000);
+    }
+  }, 12000); // 12 second timeout
+  
   // Send to AI
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: "response.create",
-      userText: recordedText.trim()
+      userText: recordedText.trim(),
+      timestamp: Date.now()
     }));
+    
+    // Store timeout ID for clearing later
+    window.currentResponseTimeout = responseTimeout;
+  } else {
+    clearTimeout(responseTimeout);
+    isProcessing = false;
+    container.classList.remove("listening", "speaking");
+    statusEl.textContent = "❌ Not connected to server";
   }
   
   // Reset for next input
   recordedText = "";
   voiceStartTime = null;
-  
-  setTimeout(() => {
-    isProcessing = false;
-    if (isListening) {
-      container.classList.add("listening");
-      statusEl.textContent = "🎤 Listening...";
-    }
-  }, 1000);
 }
 
 // Add message to conversation history
@@ -294,9 +323,10 @@ function addMessage(text, type) {
 
 // WebSocket connection handling
 ws.onopen = () => {
-  console.log("Connected to server");
-  statusEl.textContent = "Ready - Click to start listening";
+  statusEl.textContent = "Ready - Hold button to talk";
   toggleBtn.disabled = false;
+  // Ensure no animations are running on connection
+  container.classList.remove("listening", "speaking");
 };
 
 ws.onerror = (error) => {
@@ -312,10 +342,15 @@ ws.onclose = () => {
 ws.onmessage = async (e) => {
   try {
     const msg = JSON.parse(e.data);
-    console.log("Received message type:", msg.type);
     
     if (msg.type === "response.text") {
-      console.log("AI says:", msg.text);
+      // Clear timeout since we got a response
+      if (window.currentResponseTimeout) {
+        clearTimeout(window.currentResponseTimeout);
+        window.currentResponseTimeout = null;
+      }
+      
+      isProcessing = false;
       
       // Add AI message to conversation
       addMessage(msg.text, 'ai');
@@ -324,75 +359,150 @@ ws.onmessage = async (e) => {
       await speakText(msg.text);
       
     } else if (msg.type === "error") {
+      // Clear timeout on error too
+      if (window.currentResponseTimeout) {
+        clearTimeout(window.currentResponseTimeout);
+        window.currentResponseTimeout = null;
+      }
+      
+      isProcessing = false;
       statusEl.textContent = "❌ Error: " + msg.message;
       setTimeout(() => {
         if (isListening) {
-          statusEl.textContent = "🎤 Listening...";
+          statusEl.textContent = "🎤 Listening... (release to send)";
         } else {
-          statusEl.textContent = "Ready - Click to start listening";
+          statusEl.textContent = "Ready - Hold button to talk";
         }
       }, 3000);
     }
   } catch (error) {
-    console.error("Error:", error);
+    isProcessing = false;
+    statusEl.textContent = "❌ Message error";
+    setTimeout(() => {
+      statusEl.textContent = "Ready - Hold button to talk";
+    }, 2000);
   }
 };
 
-// Toggle listening
-toggleBtn.onclick = async () => {
-  if (!isListening) {
-    try {
-      toggleBtn.disabled = true;
-      
-      // Initialize audio and speech recognition
-      await initializeAudio();
-      
-      if (recognition) {
-        recognition.start();
-      }
-      
-      isListening = true;
-      recordedText = "";
-      
-      container.classList.add("listening");
-      toggleBtn.innerHTML = '<span class="btn-icon">🔇</span><span class="btn-text">Stop Listening</span>';
-      toggleBtn.classList.add("active");
-      statusEl.textContent = "🎤 Listening...";
-      
-      // Start voice activity detection
-      voiceActivityDetection();
-      
-      toggleBtn.disabled = false;
-      
-    } catch (error) {
-      console.error("Error starting listening:", error);
-      statusEl.textContent = "❌ Microphone access denied";
-      toggleBtn.disabled = false;
-    }
-  } else {
-    // Stop listening
-    if (recognition) {
-      recognition.stop();
-    }
-    
-    if (audioContext) {
-      audioContext.close();
-      audioContext = null;
-    }
-    
-    isListening = false;
-    container.classList.remove("listening");
-    toggleBtn.innerHTML = '<span class="btn-icon">🎤</span><span class="btn-text">Start Listening</span>';
-    toggleBtn.classList.remove("active");
-    statusEl.textContent = "Ready - Click to start listening";
-    volumeBar.style.width = '0%';
-    
-    if (silenceTimer) {
-      clearTimeout(silenceTimer);
-      silenceTimer = null;
-    }
+// Push-to-talk functionality
+let isButtonPressed = false;
+
+// Mouse events for push-to-talk
+toggleBtn.onmousedown = async (e) => {
+  e.preventDefault();
+  if (isSpeaking) {
+    // Stop AI if speaking
+    stopAISpeaking();
+    return;
+  }
+  
+  if (!isButtonPressed && !isProcessing) {
+    startListening();
   }
 };
+
+toggleBtn.onmouseup = (e) => {
+  e.preventDefault();
+  if (isButtonPressed && !isProcessing) {
+    stopListeningAndProcess();
+  }
+};
+
+toggleBtn.onmouseleave = (e) => {
+  if (isButtonPressed && !isProcessing) {
+    stopListeningAndProcess();
+  }
+};
+
+// Touch events for mobile
+toggleBtn.ontouchstart = async (e) => {
+  e.preventDefault();
+  if (isSpeaking) {
+    stopAISpeaking();
+    return;
+  }
+  
+  if (!isButtonPressed && !isProcessing) {
+    startListening();
+  }
+};
+
+toggleBtn.ontouchend = (e) => {
+  e.preventDefault();
+  if (isButtonPressed && !isProcessing) {
+    stopListeningAndProcess();
+  }
+};
+
+async function startListening() {
+  try {
+    isButtonPressed = true;
+    toggleBtn.disabled = true;
+    
+    // Initialize audio and speech recognition
+    await initializeAudio();
+    
+    if (recognition) {
+      recognition.start();
+    }
+    
+    isListening = true;
+    recordedText = "";
+    voiceStartTime = null;
+    
+    // Only add listening class, remove speaking if it exists
+    container.classList.remove("speaking");
+    container.classList.add("listening");
+    toggleBtn.innerHTML = '<span class="btn-icon">🎤</span><span class="btn-text">Recording...</span>';
+    toggleBtn.classList.add("active");
+    statusEl.textContent = "🎤 Listening... (release to send)";
+    
+    // Start voice activity detection
+    voiceActivityDetection();
+    
+    toggleBtn.disabled = false;
+    
+  } catch (error) {
+    statusEl.textContent = "❌ Microphone access denied";
+    isButtonPressed = false;
+    toggleBtn.disabled = false;
+  }
+}
+
+function stopListeningAndProcess() {
+  if (!isListening) return;
+  
+  // Stop listening
+  if (recognition) {
+    recognition.stop();
+  }
+  
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
+  }
+  
+  isListening = false;
+  isButtonPressed = false;
+  // Remove all animation classes when not listening
+  container.classList.remove("listening");
+  container.classList.remove("speaking");
+  toggleBtn.innerHTML = '<span class="btn-icon">🎤</span><span class="btn-text">Hold to Talk</span>';
+  toggleBtn.classList.remove("active");
+  volumeBar.style.width = '0%';
+  
+  if (silenceTimer) {
+    clearTimeout(silenceTimer);
+    silenceTimer = null;
+  }
+  
+  // Process the recorded text if we have any
+  if (recordedText.trim()) {
+    processVoiceInput();
+  } else {
+    statusEl.textContent = "Ready - Hold button to talk";
+  }
+}
 
 // Stop AI button
 stopAIBtn.onclick = () => {
@@ -401,7 +511,6 @@ stopAIBtn.onclick = () => {
 
 // Test button - sends a test message to AI
 testBtn.onclick = () => {
-  console.log("🧪 Testing AI response");
   addMessage("Hello, can you hear me?", 'user');
   
   if (ws.readyState === WebSocket.OPEN) {
@@ -410,25 +519,39 @@ testBtn.onclick = () => {
       userText: "Hello, can you hear me? Please respond to test if you're working."
     }));
   } else {
-    console.log("❌ WebSocket not connected");
     statusEl.textContent = "❌ Not connected to server";
   }
 };
 
-// Keyboard shortcuts
+// Keyboard shortcuts - Space for push-to-talk
+let spacePressed = false;
+
 document.addEventListener("keydown", (e) => {
-  if (e.code === "Space" && !toggleBtn.disabled) {
+  if (e.code === "Space" && !toggleBtn.disabled && !spacePressed) {
     e.preventDefault();
+    spacePressed = true;
     if (isSpeaking) {
       stopAISpeaking();
-    } else if (!isListening) {
-      toggleBtn.click();
+    } else if (!isButtonPressed && !isProcessing) {
+      startListening();
     }
   }
   
   if (e.code === "Escape") {
     if (isSpeaking) {
       stopAISpeaking();
+    } else if (isListening) {
+      stopListeningAndProcess();
+    }
+  }
+});
+
+document.addEventListener("keyup", (e) => {
+  if (e.code === "Space" && spacePressed) {
+    e.preventDefault();
+    spacePressed = false;
+    if (isButtonPressed && !isProcessing) {
+      stopListeningAndProcess();
     }
   }
 });

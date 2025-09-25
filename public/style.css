@@ -71,8 +71,8 @@ body {
   height: 20px;
   background: linear-gradient(135deg, #667eea, #764ba2);
   border-radius: 2px;
-  animation: wave 1.5s ease-in-out infinite;
-  opacity: 0.3;
+  opacity: 0.1;
+  transition: all 0.3s ease;
 }
 
 .wave:nth-child(1) { animation-delay: 0s; }
@@ -87,8 +87,8 @@ body {
 }
 
 .listening .wave {
-  opacity: 1;
-  animation: wave 0.8s ease-in-out infinite;
+  opacity: 0.4;
+  background: linear-gradient(135deg, #28a745, #20c997);
 }
 
 .speaking .wave {
