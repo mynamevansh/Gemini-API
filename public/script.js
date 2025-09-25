@@ -2,23 +2,7 @@ const ws = new WebSocket("ws://localhost:3000");
 let isListening = false;
 let isProcessing = false;
 let isSpeaking = false;
-let cu// Stop AI speaking
-function stopAISpeaking() {
-  if (isSpeaking && currentUtterance) {
-    speechSynthesis.cancel();
-    isSpeaking = false;
-    container.classList.remove("speaking");
-    currentUtterance = null;
-    stopAIBtn.style.display = "none";
-    if (isListening) {
-      container.classList.add("listening");
-      statusEl.textContent = "🎤 Listening... (release to send)";
-    } else {
-      statusEl.textContent = "Ready - Hold button to talk";
-    }
-  }
-}
-
+let currentUtterance = null;
 let audioContext = null;
 let analyzer = null;
 let microphone = null;
@@ -27,7 +11,6 @@ let silenceTimer = null;
 let voiceStartTime = null;
 let recordedText = "";
 
-// DOM elements
 const statusEl = document.getElementById("status");
 const toggleBtn = document.getElementById("toggleBtn");
 const stopAIBtn = document.getElementById("stopAI");
@@ -36,27 +19,23 @@ const conversationHistory = document.getElementById("conversationHistory");
 const volumeBar = document.getElementById("volumeBar");
 const container = document.querySelector(".container");
 
-// Voice activity detection settings
-const SILENCE_THRESHOLD = 1200; // ms of silence before stopping recording (reduced for faster response)
-const VOLUME_THRESHOLD = 0.003; // Minimum volume to detect voice (more sensitive)
-const MIN_SPEECH_DURATION = 200; // Minimum speech duration in ms (reduced)
+const SILENCE_THRESHOLD = 1200;
+const VOLUME_THRESHOLD = 0.003;
+const MIN_SPEECH_DURATION = 200;
 
-// Initialize
 statusEl.textContent = "Connecting...";
 toggleBtn.disabled = true;
 
-// Ensure clean initial state - no animations
 container.classList.remove("listening", "speaking");
 
-// Initialize speech recognition
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SpeechRecognition();
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = 'en-US';
-  recognition.maxAlternatives = 1;  // Faster processing
-  recognition.serviceURI = 'wss://www.google.com/speech-api/v2/recognize'; // Use faster endpoint
+  recognition.maxAlternatives = 1;
+  recognition.serviceURI = 'wss://www.google.com/speech-api/v2/recognize';
   
   recognition.onresult = (event) => {
     let finalTranscript = '';
@@ -83,23 +62,18 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   recognition.onerror = (event) => {
     statusEl.textContent = "Speech recognition error";
   };
-} else {
-  console.warn('Speech recognition not supported');
 }
 
-// Text-to-speech function with interrupt capability
 function speakText(text) {
   return new Promise((resolve) => {
     if ('speechSynthesis' in window) {
-      // Stop any current speech
       speechSynthesis.cancel();
       
       currentUtterance = new SpeechSynthesisUtterance(text);
-      currentUtterance.rate = 1.2;  // Faster speech rate
+      currentUtterance.rate = 1.2;
       currentUtterance.pitch = 1;
       currentUtterance.volume = 1;
       
-      // Choose a nice voice if available
       const voices = speechSynthesis.getVoices();
       const preferredVoice = voices.find(voice => 
         voice.name.includes('Google') || 
@@ -151,7 +125,6 @@ function speakText(text) {
   });
 }
 
-// Stop AI speaking
 function stopAISpeaking() {
   if (isSpeaking && currentUtterance) {
     speechSynthesis.cancel();
@@ -160,14 +133,14 @@ function stopAISpeaking() {
     currentUtterance = null;
     stopAIBtn.style.display = "none";
     if (isListening) {
-      statusEl.textContent = "🎤 Listening...";
+      container.classList.add("listening");
+      statusEl.textContent = "🎤 Listening... (release to send)";
     } else {
-      statusEl.textContent = "Ready - Click to start listening";
+      statusEl.textContent = "Ready - Hold button to talk";
     }
   }
 }
 
-// Initialize audio context for voice activity detection
 async function initializeAudio() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -190,12 +163,10 @@ async function initializeAudio() {
     
     return stream;
   } catch (error) {
-    console.error("Error accessing microphone:", error);
     throw error;
   }
 }
 
-// Get audio volume level
 function getVolumeLevel() {
   if (!analyzer) return 0;
   
@@ -212,30 +183,24 @@ function getVolumeLevel() {
   return average / 255;
 }
 
-// Voice activity detection loop
 function voiceActivityDetection() {
   if (!isListening) return;
   
   const volume = getVolumeLevel();
   volumeBar.style.width = (volume * 100) + '%';
   
-  // Reduced logging for cleaner console
-  
   if (volume > VOLUME_THRESHOLD) {
-    // Voice detected
     if (!voiceStartTime) {
       voiceStartTime = Date.now();
     }
     
-    // Clear silence timer
     if (silenceTimer) {
       clearTimeout(silenceTimer);
       silenceTimer = null;
     }
     
-    statusEl.textContent = "🎤 Listening...";
+    statusEl.textContent = "🎤 Speaking...";
   } else {
-    // Silence detected - auto-stop if button is still pressed
     if (voiceStartTime && !silenceTimer && isButtonPressed) {
       silenceTimer = setTimeout(() => {
         const speechDuration = Date.now() - voiceStartTime;
@@ -251,19 +216,15 @@ function voiceActivityDetection() {
   requestAnimationFrame(voiceActivityDetection);
 }
 
-// Process voice input
 function processVoiceInput() {
   if (isProcessing || !recordedText.trim()) return;
   
   isProcessing = true;
-  // Remove all animation classes during processing
   container.classList.remove("listening", "speaking");
   statusEl.textContent = "🤖 Processing...";
   
-  // Add user message to conversation
   addMessage(recordedText.trim(), 'user');
   
-  // Set timeout for response
   const responseTimeout = setTimeout(() => {
     if (isProcessing) {
       isProcessing = false;
@@ -273,9 +234,8 @@ function processVoiceInput() {
         statusEl.textContent = "Ready - Hold button to talk";
       }, 2000);
     }
-  }, 12000); // 12 second timeout
+  }, 12000);
   
-  // Send to AI
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: "response.create",
@@ -283,7 +243,6 @@ function processVoiceInput() {
       timestamp: Date.now()
     }));
     
-    // Store timeout ID for clearing later
     window.currentResponseTimeout = responseTimeout;
   } else {
     clearTimeout(responseTimeout);
@@ -292,12 +251,10 @@ function processVoiceInput() {
     statusEl.textContent = "❌ Not connected to server";
   }
   
-  // Reset for next input
   recordedText = "";
   voiceStartTime = null;
 }
 
-// Add message to conversation history
 function addMessage(text, type) {
   const messageEl = document.createElement('div');
   messageEl.className = `message ${type}-message`;
@@ -321,17 +278,14 @@ function addMessage(text, type) {
   conversationHistory.scrollTop = conversationHistory.scrollHeight;
 }
 
-// WebSocket connection handling
 ws.onopen = () => {
   statusEl.textContent = "Ready - Hold button to talk";
   toggleBtn.disabled = false;
-  // Ensure no animations are running on connection
   container.classList.remove("listening", "speaking");
 };
 
 ws.onerror = (error) => {
   statusEl.textContent = "❌ Connection error";
-  console.error("WebSocket error:", error);
 };
 
 ws.onclose = () => {
@@ -344,7 +298,6 @@ ws.onmessage = async (e) => {
     const msg = JSON.parse(e.data);
     
     if (msg.type === "response.text") {
-      // Clear timeout since we got a response
       if (window.currentResponseTimeout) {
         clearTimeout(window.currentResponseTimeout);
         window.currentResponseTimeout = null;
@@ -352,14 +305,11 @@ ws.onmessage = async (e) => {
       
       isProcessing = false;
       
-      // Add AI message to conversation
       addMessage(msg.text, 'ai');
       
-      // Speak the response
       await speakText(msg.text);
       
     } else if (msg.type === "error") {
-      // Clear timeout on error too
       if (window.currentResponseTimeout) {
         clearTimeout(window.currentResponseTimeout);
         window.currentResponseTimeout = null;
@@ -384,14 +334,11 @@ ws.onmessage = async (e) => {
   }
 };
 
-// Push-to-talk functionality
 let isButtonPressed = false;
 
-// Mouse events for push-to-talk
 toggleBtn.onmousedown = async (e) => {
   e.preventDefault();
   if (isSpeaking) {
-    // Stop AI if speaking
     stopAISpeaking();
     return;
   }
@@ -414,7 +361,6 @@ toggleBtn.onmouseleave = (e) => {
   }
 };
 
-// Touch events for mobile
 toggleBtn.ontouchstart = async (e) => {
   e.preventDefault();
   if (isSpeaking) {
@@ -439,7 +385,6 @@ async function startListening() {
     isButtonPressed = true;
     toggleBtn.disabled = true;
     
-    // Initialize audio and speech recognition
     await initializeAudio();
     
     if (recognition) {
@@ -450,14 +395,12 @@ async function startListening() {
     recordedText = "";
     voiceStartTime = null;
     
-    // Only add listening class, remove speaking if it exists
     container.classList.remove("speaking");
     container.classList.add("listening");
     toggleBtn.innerHTML = '<span class="btn-icon">🎤</span><span class="btn-text">Recording...</span>';
     toggleBtn.classList.add("active");
     statusEl.textContent = "🎤 Listening... (release to send)";
     
-    // Start voice activity detection
     voiceActivityDetection();
     
     toggleBtn.disabled = false;
@@ -472,7 +415,6 @@ async function startListening() {
 function stopListeningAndProcess() {
   if (!isListening) return;
   
-  // Stop listening
   if (recognition) {
     recognition.stop();
   }
@@ -484,7 +426,6 @@ function stopListeningAndProcess() {
   
   isListening = false;
   isButtonPressed = false;
-  // Remove all animation classes when not listening
   container.classList.remove("listening");
   container.classList.remove("speaking");
   toggleBtn.innerHTML = '<span class="btn-icon">🎤</span><span class="btn-text">Hold to Talk</span>';
@@ -496,7 +437,6 @@ function stopListeningAndProcess() {
     silenceTimer = null;
   }
   
-  // Process the recorded text if we have any
   if (recordedText.trim()) {
     processVoiceInput();
   } else {
@@ -504,12 +444,10 @@ function stopListeningAndProcess() {
   }
 }
 
-// Stop AI button
 stopAIBtn.onclick = () => {
   stopAISpeaking();
 };
 
-// Test button - sends a test message to AI
 testBtn.onclick = () => {
   addMessage("Hello, can you hear me?", 'user');
   
@@ -523,7 +461,6 @@ testBtn.onclick = () => {
   }
 };
 
-// Keyboard shortcuts - Space for push-to-talk
 let spacePressed = false;
 
 document.addEventListener("keydown", (e) => {
@@ -556,17 +493,13 @@ document.addEventListener("keyup", (e) => {
   }
 });
 
-// Auto-interrupt when user starts speaking
 setInterval(() => {
   if (isListening && isSpeaking && getVolumeLevel() > VOLUME_THRESHOLD) {
-    console.log("User interrupted AI - stopping speech");
     stopAISpeaking();
   }
 }, 100);
 
-// Load voices when available
 if ('speechSynthesis' in window) {
   speechSynthesis.onvoiceschanged = () => {
-    // Voices loaded
   };
 }

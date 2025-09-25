@@ -11,9 +11,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.static(path.join(__dirname, "../public")));
 
-// Handle favicon.ico requests to prevent 404 errors
 app.get('/favicon.ico', (req, res) => {
-  res.status(204).end(); // No Content
+  res.status(204).end();
 });
 
 const server = http.createServer(app);
@@ -26,7 +25,6 @@ async function callGeminiAPI(prompt) {
   try {
     console.log("🤖 Processing AI request...");
     
-    // Validate API key first
     if (!process.env.GEMINI_API_KEY) {
       throw new Error("API key not found");
     }
@@ -34,7 +32,7 @@ async function callGeminiAPI(prompt) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
     
     const response = await fetch(url, {
       method: "POST",
@@ -43,7 +41,7 @@ async function callGeminiAPI(prompt) {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { 
           temperature: 0.3, 
-          maxOutputTokens: 500,  // Reduced for faster response
+          maxOutputTokens: 500,
           candidateCount: 1
         }
       }),
@@ -56,7 +54,6 @@ async function callGeminiAPI(prompt) {
       const errorText = await response.text();
       console.error("❌ API Error:", response.status);
       
-      // Return a helpful fallback response instead of failing
       return `Hello! I'm your AI assistant, but I'm currently having trouble connecting to my AI service. However, I can still help you! Here are some things I can assist with:
 
 • Answer questions about various topics
@@ -84,7 +81,6 @@ Please try asking me something, and I'll do my best to help! (Note: I'm currentl
     const duration = Date.now() - startTime;
     console.error(`❌ API Error (${duration}ms):`, error.message);
     
-    // Return faster fallback responses based on error type
     if (error.name === 'AbortError') {
       return "Sorry, that took too long to process. Please try asking something simpler!";
     }
@@ -106,7 +102,6 @@ wss.on("connection", (client) => {
         audioChunks.push(data.audio);
         
       } else if (data.type === "response.create") {
-        // Get the actual user text from speech recognition
         const userText = data.userText || "Hello";
         console.log("👤 User:", userText);
         
